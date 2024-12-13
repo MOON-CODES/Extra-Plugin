@@ -1,88 +1,80 @@
 import os
+import time
+import requests
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from PIL import Image
 from VIPMUSIC import app
-from TheApi import api
 
-@app.on_message(filters.command(["tgm", "tgt", "telegraph", "tl"]))
-async def get_link_group(client, message):
-    if not message.reply_to_message:
-        return await message.reply_text(
-            "Pʟᴇᴀsᴇ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇᴅɪᴀ ᴛᴏ ᴜᴘʟᴏᴀᴅ ᴏɴ Tᴇʟᴇɢʀᴀᴘʜ"
-        )
+TMP_DOWNLOAD_DIRECTORY = "tg-File/"
+CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 
-    media = message.reply_to_message
-    file_size = 0
-    if media.photo:
-        file_size = media.photo.file_size
-    elif media.video:
-        file_size = media.video.file_size
-    elif media.document:
-        file_size = media.document.file_size
+def upload_to_catbox(file_path):
+    files = {'fileToUpload': open(file_path, 'rb')}
+    data = {'reqtype': 'fileupload'}
 
-    if file_size > 15 * 1024 * 1024:
-        return await message.reply_text("Pʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ᴍᴇᴅɪᴀ ғɪʟᴇ ᴜɴᴅᴇʀ 15MB.")
+    response = requests.post(CATBOX_UPLOAD_URL, files=files, data=data)
+    if response.status_code == 200:
+        return response.text.strip()
+    else:
+        raise Exception(f"Failed to upload to Catbox: {response.status_code} {response.text}")
 
-    try:
-        text = await message.reply("Pʀᴏᴄᴇssɪɴɢ...")
+def resize_image(image):
+    im = Image.open(image)
+    im.save(image, "PNG")
 
-        async def progress(current, total):
+@bot.on_message(filters.command(["tgm", "tgt"]) & filters.reply)
+async def catbox_upload(client, message):
+    input_command = message.command[0]
+    optional_title = message.text.split(" ", 1)[1] if len(message.text.split()) > 1 else None
+    
+    reply_msg = message.reply_to_message
+    
+    if input_command == "tgm":
+        if reply_msg.media:
+            start_time = time.time()
+            downloaded_file_name = await reply_msg.download(TMP_DOWNLOAD_DIRECTORY)
+            if not downloaded_file_name:
+                await message.reply("Not Supported Format Media!")
+                return
+            if downloaded_file_name.endswith((".webp")):
+                resize_image(downloaded_file_name)
+
             try:
-                await text.edit_text(f"📥 Dᴏᴡɴʟᴏᴀᴅɪɴɢ... {current * 100 / total:.1f}%")
-            except Exception:
-                pass
+                media_url = upload_to_catbox(downloaded_file_name)
+            except Exception as exc:
+                await message.reply(f"ERROR: {str(exc)}")
+                os.remove(downloaded_file_name)
+            else:
+                os.remove(downloaded_file_name)
+                end_time = time.time()
+                time_taken = round(end_time - start_time, 2)
 
-        try:
-            local_path = await media.download(progress=progress)
-            await text.edit_text("📤 Uᴘʟᴏᴀᴅɪɴɢ ᴛᴏ ᴛᴇʟᴇɢʀᴀᴘʜ...")
+                await message.reply(
+                    f"➼ Uploaded to Catbox in {time_taken} seconds.\n\n➼ Copy Link : {media_url}",
+                    disable_web_page_preview=True
+                )
 
-            upload_path = api.upload_image(local_path)
+    elif input_command == "tgt":
+        if reply_msg.text:
+            page_content = reply_msg.text
+            if reply_msg.media:
+                downloaded_file_name = await reply_msg.download(TMP_DOWNLOAD_DIRECTORY)
+                with open(downloaded_file_name, "rb") as fd:
+                    file_content = fd.read().decode("utf-8")
+                    page_content += "\n" + file_content
+                os.remove(downloaded_file_name)
+            page_content = page_content.replace("\n", "<br>")
 
-            await text.edit_text(
-                f"🌐 | [ᴜᴘʟᴏᴀᴅᴇᴅ ʟɪɴᴋ]({upload_path})",
+            start_time = time.time()
+
+            await message.reply(
+                f"➼ Text has been processed and uploaded in {round(time.time() - start_time, 2)} seconds.",
                 reply_markup=InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                "ᴜᴘʟᴏᴀᴅᴇᴅ ғɪʟᴇ",
-                                url=upload_path,
-                            )
-                        ]
-                    ]
-                ),
+                    [[InlineKeyboardButton("➡ View Processed Text", url="https://catbox.moe/")]]
+                )
             )
 
-            try:
-                os.remove(local_path)
-            except Exception:
-                pass
-
-        except Exception as e:
-            await text.edit_text(f"❌ Fɪʟᴇ ᴜᴘʟᴏᴀᴅ ғᴀɪʟᴇᴅ\n\n<i>Rᴇᴀsᴏɴ: {e}</i>")
-            try:
-                os.remove(local_path)
-            except Exception:
-                pass
-            return
-    except Exception:
-        pass
-
-
-__HELP__ = """
-**ᴛᴇʟᴇɢʀᴀᴘʜ ᴜᴘʟᴏᴀᴅ ʙᴏᴛ ᴄᴏᴍᴍᴀɴᴅs**
-
-ᴜsᴇ ᴛʜᴇsᴇ ᴄᴏᴍᴍᴀɴᴅs ᴛᴏ ᴜᴘʟᴏᴀᴅ ᴍᴇᴅɪᴀ ᴛᴏ ᴛᴇʟᴇɢʀᴀᴘʜ:
-
-- `/tgm`: ᴜᴘʟᴏᴀᴅ ʀᴇᴘʟɪᴇᴅ ᴍᴇᴅɪᴀ ᴛᴏ ᴛᴇʟᴇɢʀᴀᴘʜ.
-- `/tgt`: sᴀᴍᴇ ᴀs `/tgm`.
-- `/telegraph`: sᴀᴍᴇ ᴀs `/tgm`.
-- `/tl`: sᴀᴍᴇ ᴀs `/tgm`.
-
-**ᴇxᴀᴍᴘʟᴇ:**
-- ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴏʀ ᴠɪᴅᴇᴏ ᴡɪᴛʜ `/tgm` ᴛᴏ ᴜᴘʟᴏᴀᴅ ɪᴛ.
-
-**ɴᴏᴛᴇ:**
-ʏᴏᴜ ᴍᴜsᴛ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇᴅɪᴀ ғɪʟᴇ ғᴏʀ ᴛʜᴇ ᴜᴘʟᴏᴀᴅ ᴛᴏ ᴡᴏʀᴋ.
-"""
-
+    else:
+        await message.reply("Reply to a message to upload it to Catbox.")
 __MODULE__ = "Tᴇʟᴇɢʀᴀᴘʜ"
